@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints
+
+# Virtual environment
+my_env/
+venv/
+env/
+
+# VSCode settings
+.vscode/
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Dash tools and Render config (if needed)
+.dashtools/
+.render/
+
+# Logs and temp
+*.log
+*.tmp
