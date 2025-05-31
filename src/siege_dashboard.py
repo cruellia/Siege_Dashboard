@@ -19,6 +19,7 @@ classes = sorted(df['Class'].dropna().unique())
 
 # App setup
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+server = app.server
 app.title = "Siege DPS Dashboard"
 
 # Layout
@@ -28,7 +29,7 @@ app.layout = html.Div([
         html.Div([
     html.P("by Cruellia", style={
         'fontSize': '0.9rem',
-        'color': 'gray',
+        'color': 'black',
         'marginTop': '-0.5rem',
         'marginBottom': '0.2rem'
     }),

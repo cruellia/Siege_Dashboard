@@ -3,7 +3,7 @@ services:
     name: siege-dashboard
     env: python
     buildCommand: ""
-    startCommand: python app.py
+    startCommand: python siege_dashboard.py
     envVars:
       - key: PORT
         value: 10000
