@@ -1,1 +1,1 @@
-web: gunicorn siege_dashboard:app
+web: gunicorn app:app
