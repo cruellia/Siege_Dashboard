@@ -8,7 +8,7 @@ import dash_bootstrap_components as dbc
 
 # Read the current siege data
 df = pd.read_csv("Siege_Data.csv")
-df["Datetime"] = pd.to_datetime(df["Timestamp"], format = "%y%m%d_%H%M") 
+df["Timestamp"] = pd.to_datetime(df["Timestamp"], format = "%y%m%d_%H%M")
 df['DPS'] = pd.to_numeric(df['DPS'], errors='coerce')
 
 
@@ -49,29 +49,27 @@ app.layout = html.Div([
 
     html.Div([
         html.Label("Compare Players (type to filter):"),
-        dcc.Dropdown(
-            id='player-filter',
-            options=[],
-            value=['Cruellia', 'Mika'],  # default selected players
-            multi=True,
-            placeholder="Enter player names..."
-        ),
+        dcc.Dropdown(id='player-filter', options=[], multi=True, placeholder="Enter player names...", value=["Cruellia", "Mika"]),
         dcc.Graph(id='comparison-plot')
     ], style={'marginTop': '3rem'})
 ])
 
 # Utility to build per-class tables
 def build_table(class_name, dff_class):
+    columns = [
+        {'name': 'Rank', 'id': 'Rank'},
+        {'name': 'Player', 'id': 'Player', 'presentation': 'markdown'},
+    ]
+    if 'Class' in dff_class.columns:
+        columns.append({'name': 'Class', 'id': 'Class'})
+    columns.append({'name': 'DPS', 'id': 'DPS', 'type': 'numeric', 'format': {'specifier': '.2f'}})
+
     return html.Div([
         html.H5(class_name),
 
         dash_table.DataTable(
             id={'type': 'dps-table', 'index': class_name},
-            columns=[
-                {'name': 'Rank', 'id': 'Rank'},
-                {'name': 'Player', 'id': 'Player', 'presentation': 'markdown'},
-                {'name': 'DPS', 'id': 'DPS', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-            ],
+            columns=columns,
             data=dff_class.to_dict('records'),
             style_cell={'textAlign': 'left'},
             style_table={'overflowX': 'auto'},
@@ -85,13 +83,33 @@ def build_table(class_name, dff_class):
     Output('class-tables', 'children'),
     Output('podium', 'children'),
     Output('last-update', 'children'),
-    Output('player-filter', 'options'),    
+    Output('player-filter', 'options'),
     Input('boss-filter', 'value')
 )
 def update_tables_and_podium(selected_boss):
     tables = []
     all_players = []
     top_players = []
+
+    # Combined all-classes table
+    combined_df = df[df['Boss'] == selected_boss]
+    max_dps_df = combined_df.sort_values('DPS', ascending=False).groupby('Player', as_index=False).first()
+
+    max_dps_with_tag = []
+    for _, row in max_dps_df.iterrows():
+        player_rows = combined_df[combined_df['Player'] == row['Player']].sort_values('Timestamp')
+        is_new = row['DPS'] == player_rows.iloc[-1]['DPS']
+        if is_new:
+            player_name = f"{row['Player']} **🔥 (new!)**"
+        else:
+            player_name = row['Player']
+        max_dps_with_tag.append({'Player': player_name, 'DPS': row['DPS'], 'Class': row['Class']})
+
+    final_df = pd.DataFrame(max_dps_with_tag)
+    final_df['Rank'] = final_df['DPS'].rank(ascending=False, method='first').astype(int)
+    final_df = final_df.sort_values('DPS', ascending=False)[['Rank', 'Player', 'Class', 'DPS']]
+    combined_table = build_table("All Classes", final_df)
+    tables.append(combined_table)
 
     for cls in classes:
         dff = df[(df['Boss'] == selected_boss) & (df['Class'] == cls)]
@@ -134,8 +152,7 @@ def update_tables_and_podium(selected_boss):
             ], style={'margin': '0 2rem', 'textAlign': 'center'})
         )
 
-
-    latest_time = df[df['Boss'] == selected_boss]['Datetime'].max()
+    latest_time = df[df['Boss'] == selected_boss]['Timestamp'].max()
     last_update_str = f"Last update: {latest_time.strftime('%b %d, %Y – %H:%M')}"
     player_options = [{'label': p, 'value': p} for p in sorted(set(all_players))]
 
