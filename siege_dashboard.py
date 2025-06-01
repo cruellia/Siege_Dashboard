@@ -25,20 +25,11 @@ app.title = "Siege DPS Dashboard"
 # Layout
 app.layout = html.Div([
     html.H2("Siege DPS Dashboard"),
-    #html.P("by Cruellia", style={'fontSize': '0.9rem', 'color': 'gray', 'marginTop': '-0.5rem', 'marginBottom': '1rem'}),
-        html.Div([
-    html.P("by Cruellia", style={
-        'fontSize': '0.9rem',
-        'color': 'black',
-        'marginTop': '-0.5rem',
-        'marginBottom': '0.2rem'
-    }),
-    html.P(f"Last update: {df['Datetime'].max().strftime('%b %d, %Y %H:%M')}", style={
-        'fontSize': '0.85rem',
-        'color': 'gray',
-        'marginBottom': '1.5rem'
-        })
-    ]),
+    html.P("by Cruellia", style={'fontSize': '0.9rem', 'color': 'gray', 'marginTop': '-0.5rem', 'marginBottom': '0.5rem'}),
+    html.Div(id='last-update', style={'fontSize': '0.8rem', 'color': 'gray', 'marginBottom': '1rem'}),
+
+    # Podium section
+    html.Div(id='podium', style={'display': 'flex', 'justifyContent': 'center', 'marginBottom': '2rem'}),
 
     html.Div([
         html.Label("Select Boss:"),
@@ -53,21 +44,20 @@ app.layout = html.Div([
     dbc.Row([
         dbc.Col([
             html.Div(id='class-tables', style={'display': 'flex', 'flexDirection': 'column'})
-        ], width=6),
+        ], width=12)
+    ]),
 
-        dbc.Col([
-            html.Div(id='dps-over-time', style={
-                'display': 'flex',
-                'flexDirection': 'column',
-                'height': '650vh',
-                'maxHeight': '6000px',
-                'minHeight': '800px',
-                'overflowY': 'auto',
-                'border': '1px solid #ddd',
-                'padding': '1rem'
-            })
-        ], width=6),
-    ])
+    html.Div([
+        html.Label("Compare Players (type to filter):"),
+        dcc.Dropdown(
+            id='player-filter',
+            options=[],
+            value=['Cruellia', 'Mika'],  # default selected players
+            multi=True,
+            placeholder="Enter player names..."
+        ),
+        dcc.Graph(id='comparison-plot')
+    ], style={'marginTop': '3rem'})
 ])
 
 # Utility to build per-class tables
@@ -83,22 +73,25 @@ def build_table(class_name, dff_class):
                 {'name': 'DPS', 'id': 'DPS', 'type': 'numeric', 'format': {'specifier': '.2f'}},
             ],
             data=dff_class.to_dict('records'),
-            row_selectable='single',
-            selected_rows=[0],
             style_cell={'textAlign': 'left'},
             style_table={'overflowX': 'auto'},
             page_size=10,
-            cell_selectable=True
+            cell_selectable=False
         )
     ], style={'marginBottom': '2rem'})
 
-# Create tables for each class
+# Update podium and class tables
 @app.callback(
     Output('class-tables', 'children'),
+    Output('podium', 'children'),
+    Output('last-update', 'children'),
+    Output('player-filter', 'options'),    
     Input('boss-filter', 'value')
 )
-def update_all_class_tables(selected_boss):
+def update_tables_and_podium(selected_boss):
     tables = []
+    all_players = []
+    top_players = []
 
     for cls in classes:
         dff = df[(df['Boss'] == selected_boss) & (df['Class'] == cls)]
@@ -106,10 +99,8 @@ def update_all_class_tables(selected_boss):
         if dff.empty:
             continue
 
-        # Max DPS per player
         max_dps_df = dff.sort_values('DPS', ascending=False).groupby('Player', as_index=False).first()
 
-        # Annotate if latest DPS is their highest
         max_dps_with_tag = []
         for _, row in max_dps_df.iterrows():
             player_rows = dff[dff['Player'] == row['Player']].sort_values('Timestamp')
@@ -127,60 +118,57 @@ def update_all_class_tables(selected_boss):
         final_df = final_df.sort_values('DPS', ascending=False)[['Rank', 'Player', 'DPS']]
 
         tables.append(build_table(cls, final_df))
+        all_players.extend(final_df['Player'].str.replace(" **🔥 (new!)**", "", regex=False).tolist())
+        top_players.extend(final_df[['Player', 'DPS']].values.tolist())
 
-    return tables
+    top_players_df = pd.DataFrame(top_players, columns=['Player', 'DPS'])
+    top3 = top_players_df.sort_values('DPS', ascending=False).drop_duplicates('Player').head(3)
+    podium_icons = ["🥇", "🥈", "🥉"]
+    podium = []
+    for i, (_, row) in enumerate(top3.iterrows()):
+        icon = podium_icons[i] if i < len(podium_icons) else ""
+        podium.append(
+            html.Div([
+                html.Div(icon, style={'fontSize': '2rem'}),
+                html.Div(row['Player'], style={'fontWeight': 'bold'})
+            ], style={'margin': '0 2rem', 'textAlign': 'center'})
+        )
 
-# Handle DPS over time plots on click
+
+    latest_time = df[df['Boss'] == selected_boss]['Datetime'].max()
+    last_update_str = f"Last update: {latest_time.strftime('%b %d, %Y – %H:%M')}"
+    player_options = [{'label': p, 'value': p} for p in sorted(set(all_players))]
+
+    return tables, podium, last_update_str, player_options
+
+# Player comparison plot
 @app.callback(
-    Output('dps-over-time', 'children'),
-    Input({'type': 'dps-table', 'index': dash.ALL}, 'selected_rows'),
-    State({'type': 'dps-table', 'index': dash.ALL}, 'data'),
-    State({'type': 'dps-table', 'index': dash.ALL}, 'id'),
-    State('boss-filter', 'value')
+    Output('comparison-plot', 'figure'),
+    Input('player-filter', 'value'),
+    Input('boss-filter', 'value')
 )
-def update_dps_charts_click(selected_rows_all, all_table_data, all_table_ids, selected_boss):
-    charts = []
+def update_comparison_plot(selected_players, selected_boss):
+    filtered_df = df[(df['Boss'] == selected_boss)]
 
-    for i, table_data in enumerate(all_table_data):
-        if not table_data:
-            continue
+    if selected_players:
+        filtered_df = filtered_df[filtered_df['Player'].isin(selected_players)]
 
-        selected_rows = selected_rows_all[i] if selected_rows_all[i] else [0]
-        if not selected_rows:
-            continue
+    fig = px.line(
+        filtered_df,
+        x='Timestamp',
+        y='DPS',
+        color='Player',
+        markers=True,
+        title='DPS Over Time Comparison'
+    )
+    fig.update_layout(
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        xaxis=dict(gridcolor='lightgray', title='Timestamp', tickformat='%b %d, %H:%M'),
+        yaxis=dict(gridcolor='lightgray', title='DPS')
+    )
 
-        row_idx = selected_rows[0]
-        player_name = table_data[row_idx]['Player'].replace(" **🔥 (new!)**", "")
-        cls = all_table_ids[i]['index']
-
-        player_df = df[(df['Boss'] == selected_boss) & (df['Player'] == player_name)].sort_values('Timestamp')
-
-        if player_df.empty:
-            continue
-
-        fig = px.line(
-            player_df,
-            x='Timestamp',
-            y='DPS',
-            title=f'{player_name} – DPS Over Time ({cls})',
-            markers=True
-        )
-        fig.update_layout(
-            plot_bgcolor='white',
-            paper_bgcolor='white',
-            xaxis=dict(gridcolor='lightgray', title='Timestamp', tickformat='%b %d, %H:%M'),
-            yaxis=dict(gridcolor='lightgray', title='DPS')
-        )
-
-        #charts.append(dcc.Graph(figure=fig))
-        charts.append(
-            html.Div(
-                dcc.Graph(figure=fig),
-                style={'marginBottom': '5.3rem'}
-            )
-        )
-
-    return charts
+    return fig
 
 if __name__ == "__main__":
     app.run(debug=True)
