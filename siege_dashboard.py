@@ -56,13 +56,16 @@ app.layout = html.Div([
 
 # Utility to build per-class tables
 def build_table(class_name, dff_class):
+    dff_class = dff_class.copy()
+    dff_class['DPS'] = dff_class['DPS'].round(0).astype(int).apply(lambda x: f"{x:,}".replace(",", "."))
+
     columns = [
         {'name': 'Rank', 'id': 'Rank'},
         {'name': 'Player', 'id': 'Player', 'presentation': 'markdown'},
     ]
     if 'Class' in dff_class.columns:
         columns.append({'name': 'Class', 'id': 'Class'})
-    columns.append({'name': 'DPS', 'id': 'DPS', 'type': 'numeric', 'format': {'specifier': '.2f'}})
+    columns.append({'name': 'DPS', 'id': 'DPS'})
 
     return html.Div([
         html.H5(class_name),
@@ -89,7 +92,6 @@ def build_table(class_name, dff_class):
 def update_tables_and_podium(selected_boss):
     tables = []
     all_players = []
-    top_players = []
 
     # Combined all-classes table
     combined_df = df[df['Boss'] == selected_boss]
@@ -110,6 +112,21 @@ def update_tables_and_podium(selected_boss):
     final_df = final_df.sort_values('DPS', ascending=False)[['Rank', 'Player', 'Class', 'DPS']]
     combined_table = build_table("All Classes", final_df)
     tables.append(combined_table)
+    all_players.extend(final_df['Player'].str.replace(" **🔥 (new!)**", "", regex=False).tolist())
+
+    # Podium from all players (not class-restricted)
+    podium_df = df[df['Boss'] == selected_boss]
+    top3_df = podium_df.sort_values('DPS', ascending=False).drop_duplicates('Player').head(3)
+    podium_icons = ["🥇", "🥈", "🥉"]
+    podium = []
+    for i, (_, row) in enumerate(top3_df.iterrows()):
+        icon = podium_icons[i] if i < len(podium_icons) else ""
+        podium.append(
+            html.Div([
+                html.Div(icon, style={'fontSize': '2rem'}),
+                html.Div(row['Player'], style={'fontWeight': 'bold'})
+            ], style={'margin': '0 2rem', 'textAlign': 'center'})
+        )
 
     for cls in classes:
         dff = df[(df['Boss'] == selected_boss) & (df['Class'] == cls)]
@@ -137,20 +154,6 @@ def update_tables_and_podium(selected_boss):
 
         tables.append(build_table(cls, final_df))
         all_players.extend(final_df['Player'].str.replace(" **🔥 (new!)**", "", regex=False).tolist())
-        top_players.extend(final_df[['Player', 'DPS']].values.tolist())
-
-    top_players_df = pd.DataFrame(top_players, columns=['Player', 'DPS'])
-    top3 = top_players_df.sort_values('DPS', ascending=False).drop_duplicates('Player').head(3)
-    podium_icons = ["🥇", "🥈", "🥉"]
-    podium = []
-    for i, (_, row) in enumerate(top3.iterrows()):
-        icon = podium_icons[i] if i < len(podium_icons) else ""
-        podium.append(
-            html.Div([
-                html.Div(icon, style={'fontSize': '2rem'}),
-                html.Div(row['Player'], style={'fontWeight': 'bold'})
-            ], style={'margin': '0 2rem', 'textAlign': 'center'})
-        )
 
     latest_time = df[df['Boss'] == selected_boss]['Timestamp'].max()
     last_update_str = f"Last update: {latest_time.strftime('%b %d, %Y – %H:%M')}"
@@ -189,3 +192,4 @@ def update_comparison_plot(selected_players, selected_boss):
 
 if __name__ == "__main__":
     app.run(debug=True)
+
